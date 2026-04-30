@@ -1,54 +1,55 @@
 package main
 
 import (
+	"io"
 	"os"
-	"syscall"
+	"path/filepath"
+	"sync"
 
-	"github.com/hugelgupf/p9/fsimpl/templatefs"
-	"github.com/hugelgupf/p9/p9"
+	"github.com/knusbaum/go9p/fs"
+	"github.com/knusbaum/go9p/proto"
 )
 
-type OSFile struct {
-	templatefs.NoopFile
-	path string
-	qid  p9.QID
-	f    *os.File
-}
-
-func (e *OSFile) Walk(names []string) ([]p9.QID, p9.File, error) {
-	if len(names) == 0 {
-		return []p9.QID{e.qid}, &OSFile{path: e.path, qid: e.qid}, nil
+func newPhotoFile(gofs *fs.FS, path string) fs.File {
+	stat := gofs.NewStat(filepath.Base(path), "none", "none", 0444)
+	if info, err := os.Stat(path); err == nil {
+		stat.Length = uint64(info.Size())
+		stat.Mtime = uint32(info.ModTime().Unix())
+		stat.Atime = uint32(info.ModTime().Unix())
 	}
-	return nil, nil, syscall.ENOTDIR
-}
 
-func (e *OSFile) GetAttr(req p9.AttrMask) (p9.QID, p9.AttrMask, p9.Attr, error) {
-	fi, err := os.Stat(e.path)
-	if err != nil {
-		return p9.QID{}, p9.AttrMask{}, p9.Attr{}, err
+	var mu sync.Mutex
+	fids := map[uint64]*os.File{}
+
+	return &fs.WrappedFile{
+		File: fs.NewBaseFile(stat),
+		OpenF: func(fid uint64, _ proto.Mode) error {
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			fids[fid] = f
+			mu.Unlock()
+			return nil
+		},
+		ReadF: func(fid uint64, offset, count uint64) ([]byte, error) {
+			mu.Lock()
+			f := fids[fid]
+			mu.Unlock()
+			buf := make([]byte, count)
+			n, err := f.ReadAt(buf, int64(offset))
+			if err == io.EOF {
+				err = nil
+			}
+			return buf[:n], err
+		},
+		CloseF: func(fid uint64) error {
+			mu.Lock()
+			f := fids[fid]
+			delete(fids, fid)
+			mu.Unlock()
+			return f.Close()
+		},
 	}
-	return e.qid,
-		p9.AttrMask{Mode: true, Size: true},
-		p9.Attr{Mode: p9.ModeRegular | 0444, Size: uint64(fi.Size())},
-		nil
-}
-
-func (e *OSFile) Open(mode p9.OpenFlags) (p9.QID, uint32, error) {
-	f, err := os.Open(e.path)
-	if err != nil {
-		return p9.QID{}, 0, err
-	}
-	e.f = f
-	return e.qid, 4096, nil
-}
-
-func (e *OSFile) ReadAt(buf []byte, offset int64) (int, error) {
-	return e.f.ReadAt(buf, offset)
-}
-
-func (e *OSFile) Close() error {
-	if e.f != nil {
-		return e.f.Close()
-	}
-	return nil
 }

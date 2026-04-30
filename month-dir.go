@@ -3,25 +3,13 @@ package main
 import (
 	"log"
 	"sort"
-	"syscall"
 	"time"
 
-	"github.com/hugelgupf/p9/p9"
+	"github.com/knusbaum/go9p/fs"
 )
 
-type Photos struct {
-	files []string // full disk paths
-	dir   *PhotoDir
-}
-
-type MonthsDir struct {
-	baseDir
-	filesByMonth map[string]*Photos
-	months       []string // ordered list of months
-}
-
-func newMonthsDir(entries []exifEntry) *MonthsDir {
-	photoMap := make(map[string]*Photos)
+func newMonthsDir(gofs *fs.FS, name string, entries []exifEntry) *fs.StaticDir {
+	photoMap := make(map[string][]string)
 	var months []string
 
 	for _, e := range entries {
@@ -35,55 +23,15 @@ func newMonthsDir(entries []exifEntry) *MonthsDir {
 		}
 		month := t.Format("2006-01")
 		if _, ok := photoMap[month]; !ok {
-			photoMap[month] = &Photos{}
 			months = append(months, month)
 		}
-		photoMap[month].files = append(photoMap[month].files, e.SourceFile)
+		photoMap[month] = append(photoMap[month], e.SourceFile)
 	}
 	sort.Strings(months)
 
-	return &MonthsDir{
-		baseDir:      newBaseDir(),
-		filesByMonth: photoMap,
-		months:       months,
+	dir := fs.NewStaticDir(gofs.NewStat(name, "none", "none", 0555))
+	for _, month := range months {
+		dir.AddChild(newPhotoDir(gofs, month, photoMap[month]))
 	}
-}
-
-func (d *MonthsDir) Walk(names []string) ([]p9.QID, p9.File, error) {
-	if len(names) == 0 {
-		return []p9.QID{d.qid}, d, nil
-	}
-
-	photos, ok := d.filesByMonth[names[0]]
-	if !ok || len(names) > 1 {
-		return nil, nil, syscall.ENOENT
-	}
-
-	if photos.dir == nil {
-		photos.dir = newPhotoDir(photos.files)
-	}
-
-	return []p9.QID{photos.dir.qid}, photos.dir, nil
-}
-
-func (d *MonthsDir) Readdir(offset uint64, count uint32) (p9.Dirents, error) {
-	end := min(offset+uint64(count), uint64(len(d.months)))
-	slice := d.months[offset:end]
-
-	if len(slice) == 0 {
-		return nil, nil
-	}
-
-	dirs := make(p9.Dirents, len(slice))
-
-	for i, v := range slice {
-		photos := d.filesByMonth[v]
-		if photos.dir == nil {
-			photos.dir = newPhotoDir(photos.files)
-		}
-		qid := photos.dir.qid
-		dirs[i] = p9.Dirent{QID: qid, Offset: offset + uint64(i) + 1, Type: qid.Type, Name: v}
-	}
-
-	return dirs, nil
+	return dir
 }
