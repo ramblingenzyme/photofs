@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/hugelgupf/p9/fsimpl/templatefs"
 	"github.com/hugelgupf/p9/p9"
 )
 
@@ -38,10 +37,9 @@ type exifEntry struct {
 }
 
 type Root struct {
-	templatefs.NoopFile
+	baseDir
 	jpgDir *MonthsDir
 	rawDir *MonthsDir
-	qid p9.QID
 }
 
 func newRoot(path string) *Root {
@@ -67,21 +65,10 @@ func newRoot(path string) *Root {
 	}
 
 	return &Root{
-		qid: nextQID(p9.TypeDir),
-		jpgDir: newMonthsDir(jpgEntries),
-		rawDir: newMonthsDir(rawEntries),
+		baseDir: newBaseDir(),
+		jpgDir:  newMonthsDir(jpgEntries),
+		rawDir:  newMonthsDir(rawEntries),
 	}
-}
-
-func (r *Root) GetAttr(req p9.AttrMask) (p9.QID, p9.AttrMask, p9.Attr, error) {
-	return r.qid,
-		p9.AttrMask{Mode: true},
-		p9.Attr{Mode: p9.ModeDirectory | 0555},
-		nil
-}
-
-func (r *Root) Open(mode p9.OpenFlags) (p9.QID, uint32, error) {
-	return r.qid, 4096, nil
 }
 
 func (r *Root) Attach() (p9.File, error) {

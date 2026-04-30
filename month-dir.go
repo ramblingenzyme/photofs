@@ -6,7 +6,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hugelgupf/p9/fsimpl/templatefs"
 	"github.com/hugelgupf/p9/p9"
 )
 
@@ -16,8 +15,7 @@ type Photos struct {
 }
 
 type MonthsDir struct {
-	templatefs.NoopFile
-	qid          p9.QID
+	baseDir
 	filesByMonth map[string]*Photos
 	months       []string // ordered list of months
 }
@@ -45,21 +43,10 @@ func newMonthsDir(entries []exifEntry) *MonthsDir {
 	sort.Strings(months)
 
 	return &MonthsDir{
-		qid:          nextQID(p9.TypeDir),
+		baseDir:      newBaseDir(),
 		filesByMonth: photoMap,
 		months:       months,
 	}
-}
-
-func (d *MonthsDir) Open(mode p9.OpenFlags) (p9.QID, uint32, error) {
-	return d.qid, 4096, nil
-}
-
-func (d *MonthsDir) GetAttr(req p9.AttrMask) (p9.QID, p9.AttrMask, p9.Attr, error) {
-	return d.qid,
-		p9.AttrMask{Mode: true},
-		p9.Attr{Mode: p9.ModeDirectory | 0555},
-		nil
 }
 
 func (d *MonthsDir) Walk(names []string) ([]p9.QID, p9.File, error) {
