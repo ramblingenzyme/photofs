@@ -1,34 +1,65 @@
 package main
 
 import (
+	"log"
+	"sort"
 	"syscall"
+	"time"
 
 	"github.com/hugelgupf/p9/fsimpl/templatefs"
 	"github.com/hugelgupf/p9/p9"
 )
 
 type Photos struct {
-	files []string
+	files []string // full disk paths
 	dir   *PhotoDir
 }
 
 type MonthsDir struct {
 	templatefs.NoopFile
 	qid          p9.QID
-	base         string
 	filesByMonth map[string]*Photos
 	months       []string // ordered list of months
 }
 
-func newMonthsDir(base string, files []string) *MonthsDir {
-	// TODO: integrate exiftool here to group files by month & populate the map
+func newMonthsDir(entries []exifEntry) *MonthsDir {
 	photoMap := make(map[string]*Photos)
+	var months []string
+
+	for _, e := range entries {
+		if e.DateTimeOriginal == "" {
+			continue
+		}
+		t, err := time.Parse("2006:01:02 15:04:05", e.DateTimeOriginal)
+		if err != nil {
+			log.Printf("skipping %s: %v", e.SourceFile, err)
+			continue
+		}
+		month := t.Format("2006-01")
+		if _, ok := photoMap[month]; !ok {
+			photoMap[month] = &Photos{}
+			months = append(months, month)
+		}
+		photoMap[month].files = append(photoMap[month].files, e.SourceFile)
+	}
+	sort.Strings(months)
 
 	return &MonthsDir{
-		base:         base,
+		qid:          nextQID(p9.TypeDir),
 		filesByMonth: photoMap,
-		months:       []string{},
+		months:       months,
 	}
+}
+
+func (d *MonthsDir) Open(mode p9.OpenFlags) (p9.QID, uint32, error) {
+	return d.qid, 4096, nil
+}
+
+func (d *MonthsDir) GetAttr(req p9.AttrMask) (p9.QID, p9.AttrMask, p9.Attr, error) {
+	return d.qid,
+		p9.AttrMask{Mode: true},
+		p9.Attr{Mode: p9.ModeDirectory | 0555},
+		nil
 }
 
 func (d *MonthsDir) Walk(names []string) ([]p9.QID, p9.File, error) {
@@ -42,8 +73,7 @@ func (d *MonthsDir) Walk(names []string) ([]p9.QID, p9.File, error) {
 	}
 
 	if photos.dir == nil {
-		// TODO: add Path to QID
-		photos.dir = newPhotoDir(d.base, photos.files, p9.QID{Type: p9.TypeDir})
+		photos.dir = newPhotoDir(photos.files)
 	}
 
 	return []p9.QID{photos.dir.qid}, photos.dir, nil
@@ -62,11 +92,10 @@ func (d *MonthsDir) Readdir(offset uint64, count uint32) (p9.Dirents, error) {
 	for i, v := range slice {
 		photos := d.filesByMonth[v]
 		if photos.dir == nil {
-			// TODO: add Path to QID
-			photos.dir = newPhotoDir(d.base, photos.files, p9.QID{Type: p9.TypeDir})
+			photos.dir = newPhotoDir(photos.files)
 		}
 		qid := photos.dir.qid
-		dirs[i] = p9.Dirent{QID: qid, Offset: offset + uint64(i), Type: qid.Type, Name: v}
+		dirs[i] = p9.Dirent{QID: qid, Offset: offset + uint64(i) + 1, Type: qid.Type, Name: v}
 	}
 
 	return dirs, nil

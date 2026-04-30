@@ -17,7 +17,7 @@ type OSFile struct {
 
 func (e *OSFile) Walk(names []string) ([]p9.QID, p9.File, error) {
 	if len(names) == 0 {
-		return nil, &OSFile{path: e.path, qid: e.qid}, nil
+		return []p9.QID{e.qid}, &OSFile{path: e.path, qid: e.qid}, nil
 	}
 	return nil, nil, syscall.ENOTDIR
 }
