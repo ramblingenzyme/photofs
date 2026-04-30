@@ -38,8 +38,9 @@ type exifEntry struct {
 
 type Root struct {
 	baseDir
-	jpgDir *MonthsDir
-	rawDir *MonthsDir
+	jpgDir     *MonthsDir
+	rawDir     *MonthsDir
+	undatedDir *PhotoDir
 }
 
 func newRoot(path string) *Root {
@@ -49,6 +50,8 @@ func newRoot(path string) *Root {
 	}
 
 	var jpgEntries, rawEntries []exifEntry
+	var undatedFiles []string
+
 	if out != nil {
 		var entries []exifEntry
 		if err := json.Unmarshal(out, &entries); err != nil {
@@ -56,18 +59,26 @@ func newRoot(path string) *Root {
 		}
 		for _, e := range entries {
 			ext := strings.ToLower(filepath.Ext(e.SourceFile))
+			if !jpgExts[ext] && !rawExts[ext] {
+				continue
+			}
+			if e.DateTimeOriginal == "" {
+				undatedFiles = append(undatedFiles, e.SourceFile)
+				continue
+			}
 			if jpgExts[ext] {
 				jpgEntries = append(jpgEntries, e)
-			} else if rawExts[ext] {
+			} else {
 				rawEntries = append(rawEntries, e)
 			}
 		}
 	}
 
 	return &Root{
-		baseDir: newBaseDir(),
-		jpgDir:  newMonthsDir(jpgEntries),
-		rawDir:  newMonthsDir(rawEntries),
+		baseDir:    newBaseDir(),
+		jpgDir:     newMonthsDir(jpgEntries),
+		rawDir:     newMonthsDir(rawEntries),
+		undatedDir: newPhotoDir(undatedFiles),
 	}
 }
 
@@ -80,24 +91,28 @@ func (r *Root) Walk(names []string) ([]p9.QID, p9.File, error) {
 		return []p9.QID{r.qid}, r, nil
 	}
 
-	var child *MonthsDir
-
 	switch names[0] {
 	case "jpg":
-		child = r.jpgDir
+		return []p9.QID{r.jpgDir.qid}, r.jpgDir, nil
 	case "raw":
-		child = r.rawDir
+		return []p9.QID{r.rawDir.qid}, r.rawDir, nil
+	case "undated":
+		return []p9.QID{r.undatedDir.qid}, r.undatedDir, nil
 	}
 
-	if child == nil {
-		return nil, nil, syscall.ENOENT
-	}
-
-	return []p9.QID{child.qid}, child, nil
+	return nil, nil, syscall.ENOENT
 }
 
 func (r *Root) Readdir(offset uint64, count uint32) (p9.Dirents, error) {
-	all := []string{"jpg","raw"}
+	all := []struct {
+		name string
+		qid  p9.QID
+	}{
+		{"jpg", r.jpgDir.qid},
+		{"raw", r.rawDir.qid},
+		{"undated", r.undatedDir.qid},
+	}
+
 	end := min(offset+uint64(count), uint64(len(all)))
 	slice := all[offset:end]
 
@@ -108,16 +123,10 @@ func (r *Root) Readdir(offset uint64, count uint32) (p9.Dirents, error) {
 	dirs := make(p9.Dirents, len(slice))
 	for i, v := range slice {
 		dirs[i] = p9.Dirent{
+			QID:    v.qid,
 			Offset: offset + uint64(i) + 1,
-			Name: v,
-			Type: p9.TypeDir,
-		}
-
-		switch v {
-			case "jpg":
-				dirs[i].QID = r.jpgDir.qid
-			case "raw":
-				dirs[i].QID = r.rawDir.qid
+			Name:   v.name,
+			Type:   p9.TypeDir,
 		}
 	}
 
