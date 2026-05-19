@@ -10,7 +10,7 @@ import (
 func newPhotoDir(gofs *fs.FS, name string, files []string) *fs.StaticDir {
 	dir := fs.NewStaticDir(gofs.NewStat(name, "none", "none", 0555))
 	for _, path := range files {
-		if err := dir.AddChild(newPhotoFile(gofs, path)); err != nil {
+		if err := dir.AddChild(newOsFile(gofs, path)); err != nil {
 			log.Printf("skipping %s: %v", filepath.Base(path), err)
 		}
 	}

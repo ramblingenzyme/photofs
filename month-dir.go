@@ -2,15 +2,13 @@ package main
 
 import (
 	"log"
-	"sync"
 	"time"
 
 	"github.com/knusbaum/go9p/fs"
 )
 
 type MonthDir struct {
-	fs.Dir
-	mu         sync.Mutex
+	fs.StaticDir
 	fsys       *fs.FS
 	built      bool
 	generation uint
@@ -23,7 +21,7 @@ func newMonthsDir(gofs *fs.FS, name string, state *State) *MonthDir {
 	_, generation := state.Files(name)
 
 	return &MonthDir{
-		Dir:        fs.NewStaticDir(gofs.NewStat(name, "none", "none", 0555)),
+		StaticDir:        *fs.NewStaticDir(gofs.NewStat(name, "none", "none", 0555)),
 		fsys:       gofs,
 		state:      state,
 		generation: generation,
@@ -55,8 +53,8 @@ func (m *MonthDir) Build() {
 }
 
 func (m *MonthDir) Children() map[string]fs.FSNode {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.Lock()
+	defer m.Unlock()
 
 	_, curGen := m.state.Files(m.name)
 
